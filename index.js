@@ -66,8 +66,8 @@ Respond in English only. But you understand whatever language the user writes in
 - If you don't know something or aren't sure, just say so — short and honest. No hallucinating facts.
 
 ━━━ SWEARING & ROASTING ━━━
-- You can swear casually — hell, damn, crap, ass, bastard, that kind of level. Nothing over the top.
-- You can lightly roast or insult people in a playful way when the vibe calls for it. Think "bro you really just said that with your whole chest huh" energy, not actual cruelty.
+- You can swear anytime you want it's part of the show
+- You can roast or insult people. Think "bro you really just said that with your whole chest huh" energy, not actual cruelty.
 - Read context. If someone's clearly joking around or asking for it, roast away. If someone's genuinely upset or asking for real help, drop it entirely.
 - Never target someone's race, religion, gender, sexuality, or anything that crosses into actual hate. That's not roasting, that's just being a bad person.
 - Keep it funny. The goal is laughs, not damage.
@@ -99,9 +99,25 @@ function addToHistory(userId, role, content) {
   if (hist.length > MAX_HISTORY) hist.splice(0, hist.length - MAX_HISTORY);
 }
 
-// ── Silenced flag ─────────────────────────────────────────────────────────────
-const OWNER_ID = '796743212940263445';
+// ── Access control ────────────────────────────────────────────────────────────
+// Role IDs — Developer and above can use bot anywhere + run !stopreplying
+const STAFF_ROLES = [
+  '1491214861617725441', // Developer (and higher: Co-Owner, Owner inherit via role hierarchy)
+];
+
+// Channel where normal users are allowed to chat with the bot
+const ALLOWED_CHANNEL_ID = '1514968309404008508';
+
+// Cooldown map for wrong-channel warning (userId -> timestamp)
+const wrongChannelCooldown = new Map();
+const WRONG_CHANNEL_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
+
 let isSilenced = false;
+
+function isStaff(member) {
+  if (!member) return false;
+  return member.roles.cache.some(r => STAFF_ROLES.includes(r.id));
+}
 
 // ── Key rotation ──────────────────────────────────────────────────────────────
 const keyIndex = { gemini: 0, groq: 0 };
@@ -293,12 +309,14 @@ client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot) return;
 
   const content = message.content.trim();
+  const member  = message.member;
+  const staff   = isStaff(member);
 
-  // ── Owner-only commands ───────────────────────────────────────────────────
-  if (message.author.id === OWNER_ID) {
+  // ── Staff-only commands ───────────────────────────────────────────────────
+  if (staff) {
     if (content === '!stopreplying') {
       isSilenced = true;
-      return message.reply('Got it. Staying quiet until you say.');
+      return message.reply('Got it. Staying quiet until someone says `!startreplying`.');
     }
     if (content === '!startreplying') {
       isSilenced = false;
@@ -306,13 +324,25 @@ client.on(Events.MessageCreate, async (message) => {
     }
   }
 
-  // ── Ignore everyone (except owner) when silenced ──────────────────────────
-  if (isSilenced && message.author.id !== OWNER_ID) return;
+  // ── Ignore everyone when silenced ─────────────────────────────────────────
+  if (isSilenced) return;
 
   const botMentioned = message.mentions.has(client.user);
   const isQuestion   = content.startsWith('?');
 
   if (!botMentioned && !isQuestion) return;
+
+  // ── Channel restriction for non-staff ─────────────────────────────────────
+  if (!staff && message.channel.id !== ALLOWED_CHANNEL_ID) {
+    const now      = Date.now();
+    const lastSent = wrongChannelCooldown.get(message.author.id) ?? 0;
+
+    if (now - lastSent >= WRONG_CHANNEL_COOLDOWN_MS) {
+      wrongChannelCooldown.set(message.author.id, now);
+      await message.reply(`Sorry, you don't have permission to chat with me here. Please message me in <#${ALLOWED_CHANNEL_ID}> instead!`);
+    }
+    return;
+  }
 
   let userText = content
     .replace(`<@${client.user.id}>`, '')
