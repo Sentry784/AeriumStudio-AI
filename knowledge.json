@@ -1,0 +1,34 @@
+{
+  "server": {
+    "name": "AstralPH",
+    "theme": "Semi-RPG with Dungeons and Custom World Generation",
+    "java_ip": "astralph.xyz",
+    "bedrock_ip": "astralph.xyz",
+    "bedrock_port": 19016
+  },
+  "voting": {
+    "guide": [
+      "Tap or click a vote link below",
+      "Complete the Captcha",
+      "Enter your Username in the box",
+      "Tap or click the VOTE button"
+    ],
+    "links": [
+      "https://minecraft-mp.com/server/355220/vote/",
+      "https://minecraftbestservers.com/server-astralph.6894/vote/",
+      "https://minecraftservers.org/server/687075"
+    ]
+  },
+  "features": [
+    "Pyro Fishing",
+    "Pyro Mining",
+    "Pyro Farming",
+    "Shop",
+    "Custom Enchantments",
+    "Dungeons",
+    "Custom World Generation"
+  ],
+  "player_issues": {
+    "note": "For player problems like killing, scamming, and stealing, players should create a support ticket for full assistance."
+  }
+}
