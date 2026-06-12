@@ -1,11 +1,11 @@
 const { Client, GatewayIntentBits, Events } = require('discord.js');
 const fetch = require('node-fetch');
+const fs    = require('fs');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const DISCORD_TOKEN      = process.env.DISCORD_TOKEN;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 
-// Multiple keys — add as many as you have
 const GEMINI_KEYS = [
   process.env.GEMINI_API_KEY_1,
   process.env.GEMINI_API_KEY_2,
@@ -24,18 +24,18 @@ const GROQ_MODEL       = 'llama-3.3-70b-versatile';
 const OPENROUTER_URL   = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_MODEL = 'meta-llama/llama-3.3-70b-instruct';
 
-// ── Key rotation state ────────────────────────────────────────────────────────
-const keyIndex = { gemini: 0, groq: 0 };
+// ── Astra knowledge base ──────────────────────────────────────────────────────
+const astraKnowledge = JSON.parse(fs.readFileSync('./knowledge.json', 'utf8'));
 
-function nextKey(provider) {
-  const keys = provider === 'gemini' ? GEMINI_KEYS : GROQ_KEYS;
-  if (keys.length === 0) return null;
-  const key = keys[keyIndex[provider]];
-  keyIndex[provider] = (keyIndex[provider] + 1) % keys.length;
-  return key;
+const ASTRA_KEYWORDS = ['astral', 'astralph', 'astral ph', 'astralph.xyz', 'dungeon', 'pyro fishing', 'pyro mining', 'pyro farming', 'custom enchant', 'vote', 'voting'];
+
+function isAstraQuestion(text) {
+  const lower = text.toLowerCase();
+  return ASTRA_KEYWORDS.some(kw => lower.includes(kw));
 }
 
-const SYSTEM_PROMPT = `You are AeriumStudio AI — the official AI of AeriumStudio, living inside the Discord server.
+// ── System prompt ─────────────────────────────────────────────────────────────
+const BASE_SYSTEM_PROMPT = `You are AeriumStudio AI — the official AI of AeriumStudio, living inside the Discord server.
 
 ━━━ WHO YOU ARE ━━━
 You're not a generic assistant. You're that one person in the server who knows a lot but doesn't act like it's a big deal. You help with basically anything — questions, ideas, tasks, random stuff — and you actually have a personality while doing it. You read the room. If someone's joking around, joke back. If someone needs a real answer, give a real answer. You're not cringe about it.
@@ -75,6 +75,15 @@ Respond in English only. But you understand whatever language the user writes in
 ━━━ DISCORD CONTEXT ━━━
 You're inside a Discord server. People ping you or talk in the allowed channel. Keep things readable — short paragraphs, clean formatting, no walls of text that make people's eyes glaze over.`;
 
+function buildSystemPrompt(includeAstra) {
+  if (!includeAstra) return BASE_SYSTEM_PROMPT;
+  return BASE_SYSTEM_PROMPT + `
+
+━━━ ASTRALPH SERVER INFO ━━━
+Only reference this when someone asks about AstralPH or its server.
+${JSON.stringify(astraKnowledge, null, 2)}`;
+}
+
 // ── Conversation history per user (in-memory) ─────────────────────────────────
 const histories = new Map();
 const MAX_HISTORY = 6;
@@ -90,8 +99,19 @@ function addToHistory(userId, role, content) {
   if (hist.length > MAX_HISTORY) hist.splice(0, hist.length - MAX_HISTORY);
 }
 
-// ── Gemini API call (tries all keys before giving up) ────────────────────────
-async function callGemini(history) {
+// ── Key rotation ──────────────────────────────────────────────────────────────
+const keyIndex = { gemini: 0, groq: 0 };
+
+function nextKey(provider) {
+  const keys = provider === 'gemini' ? GEMINI_KEYS : GROQ_KEYS;
+  if (keys.length === 0) return null;
+  const key = keys[keyIndex[provider]];
+  keyIndex[provider] = (keyIndex[provider] + 1) % keys.length;
+  return key;
+}
+
+// ── Gemini API call ───────────────────────────────────────────────────────────
+async function callGemini(history, systemPrompt) {
   const totalKeys = GEMINI_KEYS.length;
   if (totalKeys === 0) return { reply: null, error: { code: 'NO_KEYS', msg: 'No Gemini keys configured' } };
 
@@ -105,12 +125,11 @@ async function callGemini(history) {
   }
 
   const payload = {
-    system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+    system_instruction: { parts: [{ text: systemPrompt }] },
     contents,
     generationConfig: { maxOutputTokens: 600, temperature: 0.65 }
   };
 
-  // Try each key once
   for (let i = 0; i < totalKeys; i++) {
     const key = nextKey('gemini');
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
@@ -122,8 +141,7 @@ async function callGemini(history) {
       const code = data.error.code ?? 0;
       const msg  = data.error.message ?? 'Unknown error';
       console.warn(`[Gemini Key ${i + 1}/${totalKeys} Error ${code}]`, msg);
-      if (code === 429 || code === 500 || code === 503) continue; // try next key
-      if (data.candidates?.[0]?.finishReason === 'SAFETY') return { reply: null, error: { code: 'SAFETY', msg: 'Safety block' } };
+      if (code === 429 || code === 500 || code === 503) continue;
       return { reply: null, error: { code, msg } };
     }
 
@@ -139,13 +157,13 @@ async function callGemini(history) {
   return { reply: null, error: { code: 429, msg: 'All Gemini keys exhausted' } };
 }
 
-// ── Groq API call (tries all keys before giving up) ───────────────────────────
-async function callGroq(history) {
+// ── Groq API call ─────────────────────────────────────────────────────────────
+async function callGroq(history, systemPrompt) {
   const totalKeys = GROQ_KEYS.length;
   if (totalKeys === 0) return { reply: null, error: 'No Groq keys configured' };
 
   const messages = [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: systemPrompt },
     ...history.map(m => ({ role: m.role, content: m.content }))
   ];
 
@@ -162,7 +180,7 @@ async function callGroq(history) {
     if (data.error) {
       const msg = data.error.message ?? 'Unknown Groq error';
       console.warn(`[Groq Key ${i + 1}/${totalKeys} Error]`, msg);
-      if (data.error.code === 'rate_limit_exceeded') continue; // try next key
+      if (data.error.code === 'rate_limit_exceeded') continue;
       return { reply: null, error: msg };
     }
 
@@ -174,9 +192,9 @@ async function callGroq(history) {
 }
 
 // ── OpenRouter API call ───────────────────────────────────────────────────────
-async function callOpenRouter(history) {
+async function callOpenRouter(history, systemPrompt) {
   const messages = [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: systemPrompt },
     ...history.map(m => ({ role: m.role, content: m.content }))
   ];
 
@@ -203,16 +221,18 @@ async function callOpenRouter(history) {
   return { reply, error: null };
 }
 
-// ── Main AI handler (Gemini → Groq → OpenRouter) ─────────────────────────────
+// ── Main AI handler ───────────────────────────────────────────────────────────
 async function askAI(userId, userMessage) {
   addToHistory(userId, 'user', userMessage);
   const history = getHistory(userId);
 
+  const systemPrompt = buildSystemPrompt(isAstraQuestion(userMessage));
+
   let reply = null;
   let modelUsed = null;
 
-  // 1. Try Gemini (rotates through all keys)
-  const geminiResult = await callGemini(history);
+  // 1. Try Gemini
+  const geminiResult = await callGemini(history, systemPrompt);
   if (geminiResult.reply) {
     reply = geminiResult.reply;
     modelUsed = 'gemini';
@@ -220,10 +240,10 @@ async function askAI(userId, userMessage) {
     throw new Error('Response blocked by safety filters.');
   }
 
-  // 2. Try Groq (rotates through all keys)
+  // 2. Try Groq
   if (!reply) {
     console.warn('[Fallback] Gemini exhausted, trying Groq...');
-    const groqResult = await callGroq(history);
+    const groqResult = await callGroq(history, systemPrompt);
     if (groqResult.reply) {
       reply = groqResult.reply;
       modelUsed = 'groq';
@@ -233,9 +253,9 @@ async function askAI(userId, userMessage) {
   // 3. Try OpenRouter
   if (!reply) {
     console.warn('[Fallback] Groq exhausted, trying OpenRouter...');
-    const openRouterResult = await callOpenRouter(history);
-    if (openRouterResult.reply) {
-      reply = openRouterResult.reply;
+    const orResult = await callOpenRouter(history, systemPrompt);
+    if (orResult.reply) {
+      reply = orResult.reply;
       modelUsed = 'openrouter';
     }
   }
