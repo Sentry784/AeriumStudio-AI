@@ -100,8 +100,8 @@ function addToHistory(userId, role, content) {
 }
 
 // ── Access control ────────────────────────────────────────────────────────────
-// Role ID of the Bot role — anyone with a HIGHER position than this is considered staff
-const BOT_ROLE_ID = '1491253953705279570';
+// Role ID of the Staff role — anyone with an EQUAL OR HIGHER position than this is considered staff
+const BOT_ROLE_ID = '1492084356104323202';
 
 // Channel where normal users are allowed to chat with the bot
 const ALLOWED_CHANNEL_ID = '1514968309404008508';
@@ -117,11 +117,11 @@ let isSilenced = false;
 
 function isStaff(member) {
   if (!member) return false;
-  const botRole = member.guild.roles.cache.get(BOT_ROLE_ID);
+  const botRole = member.guild.roles.cache.get(BOT_ROLE_ID); // Staff role
   if (!botRole) return false;
 
   // Anyone whose highest role is positioned above the Bot role = staff
-  return member.roles.cache.some(r => r.position > botRole.position);
+  return member.roles.cache.some(r => r.position >= botRole.position);
 }
 
 // ── Key rotation ──────────────────────────────────────────────────────────────
@@ -338,8 +338,12 @@ client.on(Events.MessageCreate, async (message) => {
   if (!botMentioned && !isQuestion) return;
 
   // ── Channel restriction for non-staff ─────────────────────────────────────
+  console.log(`[Channel Check] id=${message.channel.id} parentId=${message.channel.parentId} staff=${staff}`);
+
   const inAllowedChannel  = message.channel.id === ALLOWED_CHANNEL_ID;
   const inAllowedCategory = message.channel.parentId === ALLOWED_CATEGORY_ID;
+
+  console.log(`[Channel Check] inAllowedChannel=${inAllowedChannel} inAllowedCategory=${inAllowedCategory}`);
 
   if (!staff && !inAllowedChannel && !inAllowedCategory) {
     const now      = Date.now();
