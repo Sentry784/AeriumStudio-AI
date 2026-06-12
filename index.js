@@ -5,7 +5,7 @@ const fetch = require('node-fetch');
 const DISCORD_TOKEN   = process.env.DISCORD_TOKEN;
 const GEMINI_API_KEY  = process.env.GEMINI_API_KEY;
 const GROQ_API_KEY    = process.env.GROQ_API_KEY;
-const ALLOWED_CHANNEL = process.env.CHANNEL_ID || '1491189148563013663';
+
 
 const GEMINI_MODEL = 'gemini-2.5-flash';
 const GEMINI_URL   = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
@@ -209,13 +209,11 @@ client.once(Events.ClientReady, () => {
   console.log(`AeriumStudio AI Bot is online as ${client.user.tag}`);
   console.log(`Primary model : ${GEMINI_MODEL}`);
   console.log(`Fallback model: ${GROQ_MODEL}`);
-  console.log(`Allowed channel: ${ALLOWED_CHANNEL}`);
+
 });
 
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot) return;
-  if (message.channel.id !== ALLOWED_CHANNEL) return;
-
   const botMentioned = message.mentions.has(client.user);
   const isQuestion   = message.content.trim().startsWith('?');
 
