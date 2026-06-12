@@ -2,10 +2,16 @@ const { Client, GatewayIntentBits, Events } = require('discord.js');
 const fetch = require('node-fetch');
 const fs = require('fs');
 
-// ── Config ──────────────────────────────────────────────────
-const DISCORD_TOKEN  = process.env.DISCORD_TOKEN;
-const OPENROUTER_KEY = process.env.OPENROUTER_KEY;
-const ALLOWED_CHANNEL = process.env.CHANNEL_ID || '1420032798579884053';
+// ── Config ────────────────────────────────────────────────────────────────────
+const DISCORD_TOKEN   = process.env.DISCORD_TOKEN;
+const GEMINI_API_KEY  = process.env.GEMINI_API_KEY;
+const GROQ_API_KEY    = process.env.GROQ_API_KEY;
+const ALLOWED_CHANNEL = process.env.CHANNEL_ID || '1491189148563013663';
+
+const GEMINI_MODEL = 'gemini-2.5-flash';
+const GEMINI_URL   = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+const GROQ_URL     = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_MODEL   = 'llama-3.3-70b-versatile';
 
 const knowledge = fs.readFileSync('./knowledge.json', 'utf8');
 
@@ -20,9 +26,8 @@ You are a knowledgeable, friendly guide for AeriumCraft. You know everything abo
 - Exception: lag/performance questions related to playing on AeriumCraft are valid.
 
 ━━━ LANGUAGE ━━━
-- Detect the language and reply in the SAME language.
-- Tagalog → reply Tagalog. Taglish → reply natural Taglish. English → English.
-- Never translate unless asked.
+- Always respond in English only, regardless of the language the user writes in.
+- Should understand any languages
 
 ━━━ RESPONSE STYLE ━━━
 - SHORT and DIRECT by default. Most answers are 1–4 sentences.
@@ -49,7 +54,7 @@ You are a knowledgeable, friendly guide for AeriumCraft. You know everything abo
 ━━━ KNOWLEDGE BASE ━━━
 ${knowledge}`;
 
-// ── Conversation history per user (in-memory) ───────────────
+// ── Conversation history per user (in-memory) ─────────────────────────────────
 const histories = new Map();
 const MAX_HISTORY = 6;
 
@@ -64,26 +69,63 @@ function addToHistory(userId, role, content) {
   if (hist.length > MAX_HISTORY) hist.splice(0, hist.length - MAX_HISTORY);
 }
 
-// ── OpenRouter call ─────────────────────────────────────────
-async function askAI(userId, userMessage) {
-  addToHistory(userId, 'user', userMessage);
-  const history = getHistory(userId);
+// ── Gemini API call ───────────────────────────────────────────────────────────
+async function callGemini(history) {
+  const contents = history.map(m => ({
+    role:  m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: m.content }]
+  }));
 
+  if (contents.length > 0 && contents[0].role === 'model') {
+    contents.unshift({ role: 'user', parts: [{ text: 'Hello' }] });
+  }
+
+  const payload = {
+    system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+    contents,
+    generationConfig: { maxOutputTokens: 600, temperature: 0.65 }
+  };
+
+  const res = await fetch(GEMINI_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  const data = await res.json();
+
+  if (data.error) {
+    const code = data.error.code ?? 0;
+    const msg  = data.error.message ?? 'Unknown error';
+    console.error(`[Gemini Error ${code}]`, msg);
+    return { reply: null, error: { code, msg } };
+  }
+
+  const finishReason = data.candidates?.[0]?.finishReason;
+  if (finishReason === 'SAFETY') {
+    console.warn('[Gemini] Response blocked by safety filters.');
+    return { reply: null, error: { code: 'SAFETY', msg: 'Safety block' } };
+  }
+
+  const reply = data.candidates?.[0]?.content?.parts?.[0]?.text ?? null;
+  return { reply, error: null };
+}
+
+// ── Groq API call (fallback) ──────────────────────────────────────────────────
+async function callGroq(history) {
   const messages = [
     { role: 'system', content: SYSTEM_PROMPT },
-    ...history
+    ...history.map(m => ({ role: m.role, content: m.content }))
   ];
 
-  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+  const res = await fetch(GROQ_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${OPENROUTER_KEY}`,
-      'HTTP-Referer': 'https://aeriumcraft.xyz',
-      'X-Title': 'AeriumCraft AI Bot'
+      'Authorization': `Bearer ${GROQ_API_KEY}`
     },
     body: JSON.stringify({
-      model: 'openrouter/free',
+      model: GROQ_MODEL,
       messages,
       max_tokens: 600,
       temperature: 0.65
@@ -91,12 +133,72 @@ async function askAI(userId, userMessage) {
   });
 
   const data = await res.json();
-  const reply = data?.choices?.[0]?.message?.content || "Sorry, I couldn't respond properly.";
-  addToHistory(userId, 'assistant', reply);
-  return reply;
+
+  if (data.error) {
+    const msg = data.error.message ?? 'Unknown Groq error';
+    console.error('[Groq Error]', msg);
+    return { reply: null, error: msg };
+  }
+
+  const reply = data.choices?.[0]?.message?.content ?? null;
+  return { reply, error: null };
 }
 
-// ── Discord client ──────────────────────────────────────────
+// ── Friendly error messages ───────────────────────────────────────────────────
+function geminiErrorMessage(code) {
+  return {
+    401: 'Invalid Gemini API key.',
+    403: 'Gemini API access denied.',
+    429: 'Rate limit hit. Switching to backup AI...',
+    500: 'Gemini is temporarily unavailable. Switching to backup AI...',
+    503: 'Gemini is temporarily unavailable. Switching to backup AI...'
+  }[code] ?? null;
+}
+
+// ── Main AI handler (Gemini → Groq fallback) ──────────────────────────────────
+async function askAI(userId, userMessage) {
+  addToHistory(userId, 'user', userMessage);
+  const history = getHistory(userId);
+
+  // 1. Try Gemini
+  const geminiResult = await callGemini(history);
+
+  let reply = null;
+  let modelUsed = 'gemini';
+
+  if (geminiResult.reply) {
+    reply = geminiResult.reply;
+  } else {
+    const errCode = geminiResult.error?.code;
+
+    // Fallback on rate limit / server errors
+    const shouldFallback = [429, 500, 503].includes(errCode) || errCode !== 'SAFETY';
+
+    if (shouldFallback) {
+      console.warn(`[Fallback] Gemini failed (code ${errCode}), trying Groq...`);
+      const groqResult = await callGroq(history);
+
+      if (groqResult.reply) {
+        reply = groqResult.reply;
+        modelUsed = 'groq';
+      } else {
+        throw new Error('Both AI providers are currently unavailable. Please try again shortly.');
+      }
+    } else {
+      // Safety block — don't fallback, just surface it
+      throw new Error('Response blocked by safety filters.');
+    }
+  }
+
+  console.log(`[AI] Responded via ${modelUsed}`);
+
+  // Trim to Discord's limit
+  const trimmed = reply.length > 1800 ? reply.slice(0, 1797) + '...' : reply;
+  addToHistory(userId, 'assistant', trimmed);
+  return trimmed;
+}
+
+// ── Discord client ────────────────────────────────────────────────────────────
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -107,20 +209,20 @@ const client = new Client({
 
 client.once(Events.ClientReady, () => {
   console.log(`AeriumCraft AI Bot is online as ${client.user.tag}`);
+  console.log(`Primary model : ${GEMINI_MODEL}`);
+  console.log(`Fallback model: ${GROQ_MODEL}`);
+  console.log(`Allowed channel: ${ALLOWED_CHANNEL}`);
 });
 
 client.on(Events.MessageCreate, async (message) => {
-  // Ignore bots and messages outside allowed channel
   if (message.author.bot) return;
   if (message.channel.id !== ALLOWED_CHANNEL) return;
 
-  // Only respond if bot is mentioned OR message starts with "?" OR bot's name is in message
   const botMentioned = message.mentions.has(client.user);
   const isQuestion   = message.content.trim().startsWith('?');
 
   if (!botMentioned && !isQuestion) return;
 
-  // Clean up the message
   let userText = message.content
     .replace(`<@${client.user.id}>`, '')
     .replace(/^\?/, '')
@@ -130,16 +232,14 @@ client.on(Events.MessageCreate, async (message) => {
     return message.reply('Ask me anything about AeriumCraft!');
   }
 
-  // Show typing indicator
   await message.channel.sendTyping();
 
   try {
     const reply = await askAI(message.author.id, userText);
-    // Reply and mention the user
     await message.reply(reply);
   } catch (err) {
-    console.error('AI Error:', err);
-    await message.reply("Sorry, I couldn't respond right now. Try again in a moment.");
+    console.error('[Bot Error]', err.message);
+    await message.reply(`Sorry, something went wrong: ${err.message}`);
   }
 });
 
