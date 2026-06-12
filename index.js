@@ -12,7 +12,7 @@ const GEMINI_URL       = `https://generativelanguage.googleapis.com/v1beta/model
 const GROQ_URL         = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODEL       = 'llama-3.3-70b-versatile';
 const OPENROUTER_URL   = 'https://openrouter.ai/api/v1/chat/completions';
-const OPENROUTER_MODEL = 'mistralai/mistral-small-3.2-24b-instruct:free';
+const OPENROUTER_MODEL = 'mistralai/mistral-small-3.2-24b-instruct';
 
 const SYSTEM_PROMPT = `You are AeriumStudio AI — the official AI of AeriumStudio, living inside the Discord server.
 
