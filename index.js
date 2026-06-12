@@ -1,6 +1,5 @@
 const { Client, GatewayIntentBits, Events } = require('discord.js');
 const fetch = require('node-fetch');
-const fs = require('fs');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const DISCORD_TOKEN   = process.env.DISCORD_TOKEN;
@@ -12,8 +11,6 @@ const GEMINI_MODEL = 'gemini-2.5-flash';
 const GEMINI_URL   = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 const GROQ_URL     = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODEL   = 'llama-3.3-70b-versatile';
-
-const knowledge = fs.readFileSync('./knowledge.json', 'utf8');
 
 const SYSTEM_PROMPT = `You are AeriumStudio AI — the official AI of AeriumStudio, living inside the Discord server.
 
@@ -32,7 +29,7 @@ Respond in English only. But you understand whatever language the user writes in
 - Short by default. 1–4 sentences handles most things.
 - Only go long when someone actually needs a full explanation, guide, or list.
 - Zero filler. No "Great question!" No "Of course!" No "Sure, I'd be happy to help!" Just answer.
-- Format nicely for Discord — bold the important stuff, use bullet points or `code blocks` when it makes sense.
+- Format nicely for Discord — bold the important stuff, use bullet points or \`code blocks\` when it makes sense.
 - Stay under 1800 characters (Discord limit). If something genuinely needs more, break it into parts.
 
 ━━━ VIBE & PERSONALITY ━━━
@@ -46,10 +43,7 @@ Respond in English only. But you understand whatever language the user writes in
 - If you don't know something or aren't sure, just say so — short and honest. No hallucinating facts.
 
 ━━━ DISCORD CONTEXT ━━━
-You're inside a Discord server. People ping you or talk in the allowed channel. Keep things readable — short paragraphs, clean formatting, no walls of text that make people's eyes glaze over.
-
-━━━ KNOWLEDGE BASE ━━━
-${knowledge}`;
+You're inside a Discord server. People ping you or talk in the allowed channel. Keep things readable — short paragraphs, clean formatting, no walls of text that make people's eyes glaze over.`;
 
 // ── Conversation history per user (in-memory) ─────────────────────────────────
 const histories = new Map();
@@ -205,7 +199,7 @@ const client = new Client({
 });
 
 client.once(Events.ClientReady, () => {
-  console.log(`AeriumCraft AI Bot is online as ${client.user.tag}`);
+  console.log(`AeriumStudio AI Bot is online as ${client.user.tag}`);
   console.log(`Primary model : ${GEMINI_MODEL}`);
   console.log(`Fallback model: ${GROQ_MODEL}`);
   console.log(`Allowed channel: ${ALLOWED_CHANNEL}`);
@@ -226,7 +220,7 @@ client.on(Events.MessageCreate, async (message) => {
     .trim();
 
   if (!userText) {
-    return message.reply('Ask me anything about AeriumCraft!');
+    return message.reply('Ask me anything!');
   }
 
   await message.channel.sendTyping();
