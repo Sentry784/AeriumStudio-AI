@@ -101,10 +101,13 @@ function addToHistory(userId, role, content) {
 
 // ── Access control ────────────────────────────────────────────────────────────
 // Role ID of the Bot role — anyone with a HIGHER position than this is considered staff
-const BOT_ROLE_ID = '1491214861617725441';
+const BOT_ROLE_ID = '1491253953705279570';
 
 // Channel where normal users are allowed to chat with the bot
 const ALLOWED_CHANNEL_ID = '1514968309404008508';
+
+// Category where ALL channels are allowed
+const ALLOWED_CATEGORY_ID = '1491381012972699689';
 
 // Cooldown map for wrong-channel warning (userId -> timestamp)
 const wrongChannelCooldown = new Map();
@@ -335,7 +338,10 @@ client.on(Events.MessageCreate, async (message) => {
   if (!botMentioned && !isQuestion) return;
 
   // ── Channel restriction for non-staff ─────────────────────────────────────
-  if (!staff && message.channel.id !== ALLOWED_CHANNEL_ID) {
+  const inAllowedChannel  = message.channel.id === ALLOWED_CHANNEL_ID;
+  const inAllowedCategory = message.channel.parentId === ALLOWED_CATEGORY_ID;
+
+  if (!staff && !inAllowedChannel && !inAllowedCategory) {
     const now      = Date.now();
     const lastSent = wrongChannelCooldown.get(message.author.id) ?? 0;
 
