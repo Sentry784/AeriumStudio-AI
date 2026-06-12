@@ -22,7 +22,7 @@ const GEMINI_MODEL     = 'gemini-2.5-flash';
 const GROQ_URL         = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODEL       = 'llama-3.3-70b-versatile';
 const OPENROUTER_URL   = 'https://openrouter.ai/api/v1/chat/completions';
-const OPENROUTER_MODEL = 'google/gemini-2.0-flash-001';
+const OPENROUTER_MODEL = 'meta-llama/llama-3.3-70b-instruct';
 
 // ── Key rotation state ────────────────────────────────────────────────────────
 const keyIndex = { gemini: 0, groq: 0 };
