@@ -99,6 +99,10 @@ function addToHistory(userId, role, content) {
   if (hist.length > MAX_HISTORY) hist.splice(0, hist.length - MAX_HISTORY);
 }
 
+// ── Silenced flag ─────────────────────────────────────────────────────────────
+const OWNER_ID = '796743212940263445';
+let isSilenced = false;
+
 // ── Key rotation ──────────────────────────────────────────────────────────────
 const keyIndex = { gemini: 0, groq: 0 };
 
@@ -288,12 +292,29 @@ client.once(Events.ClientReady, () => {
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot) return;
 
+  const content = message.content.trim();
+
+  // ── Owner-only commands ───────────────────────────────────────────────────
+  if (message.author.id === OWNER_ID) {
+    if (content === '!stopreplying') {
+      isSilenced = true;
+      return message.reply('Got it. Staying quiet until you say.');
+    }
+    if (content === '!startreplying') {
+      isSilenced = false;
+      return message.reply('Back online!');
+    }
+  }
+
+  // ── Ignore everyone (except owner) when silenced ──────────────────────────
+  if (isSilenced && message.author.id !== OWNER_ID) return;
+
   const botMentioned = message.mentions.has(client.user);
-  const isQuestion   = message.content.trim().startsWith('?');
+  const isQuestion   = content.startsWith('?');
 
   if (!botMentioned && !isQuestion) return;
 
-  let userText = message.content
+  let userText = content
     .replace(`<@${client.user.id}>`, '')
     .replace(/^\?/, '')
     .trim();
